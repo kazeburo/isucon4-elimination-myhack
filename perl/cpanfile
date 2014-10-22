@@ -1,0 +1,20 @@
+requires "DBIx::Sunny";
+requires "JSON::XS";
+requires "Digest::SHA";
+requires "File::Temp";
+requires "Time::Piece";
+
+requires "DBD::mysql";
+requires "Starman";
+requires "Plack::Session";
+requires "Data::Dumper";
+
+requires "Kossy", 0.38;
+requires "Starlet", 0.24;
+requires "URL::Encode::XS";
+requires "Plack::Middleware::Session::Simple";
+requires "Cache::Memcached::Fast";
+requires "Cache::FastMmap";
+requires "Sereal";
+requires "Redis::Fast";
+
