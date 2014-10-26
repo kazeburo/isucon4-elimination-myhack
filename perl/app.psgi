@@ -25,13 +25,13 @@ my $app = Isu4Qualifier::Web->psgi($root_dir);
 builder {
   enable 'ReverseProxy';
   enable 'Session::Simple',
-#        store => Cache::Memcached::Fast->new({
-#            servers => [ { address => "localhost:11211",noreply=>0} ],
-#            serialize_methods => [ sub { $encoder->encode($_[0])}, 
-#                                   sub { $decoder->decode($_[0])} ],
-#        }),
-      store => $cfm,
-      serializer => [sub { $encoder->encode($_[0]) }, sub { $decoder->decode($_[0]) }],
+        store => Cache::Memcached::Fast->new({
+            servers => [ { address => "localhost:11211",noreply=>0} ],
+            serialize_methods => [ sub { $encoder->encode($_[0])}, 
+                                   sub { $decoder->decode($_[0])} ],
+        }),
+#      store => $cfm,
+#      serializer => [sub { $encoder->encode($_[0]) }, sub { $decoder->decode($_[0]) }],
       httponly => 1,
       cookie_name => "isu4_session",
       keep_empty => 0;

@@ -44,7 +44,7 @@ my $users_id_table = {};
       $redis->del("user-fail-$l->{user_id}",$cb) if $l->{succeeded};
       #user-log
       $redis->lpush("user-log-$l->{user_id}",$l->{created_at}."|".$l->{ip},$cb) if $l->{succeeded};
-      $redis->wait_all_responses;
+      $redis->wait_one_response;
     }
 }
 
@@ -85,34 +85,17 @@ sub calculate_password_hash {
   sha256_hex($password . ':' . $salt);
 };
 
-sub user_locked {
-  my ($self, $user) = @_;
-  #my $log = $self->db->select_one(
-  #  'SELECT COUNT(1) FROM login_log WHERE user_id = ? AND id > IFNULL((select id from login_log where user_id = ? AND succeeded = 1 ORDER BY id DESC LIMIT 1), 0)',
-  #  $user->{'id'}, $user->{'id'});
-  my $log = $self->redis->get("user-fail-$user->{id}") // 0; 
-  $self->config->{user_lock_threshold} <= $log;
-};
-
-sub ip_banned {
-  my ($self, $ip) = @_;
-  #my $log = $self->db->select_one(
-  #  'SELECT COUNT(1) FROM login_log WHERE ip = ? AND id > IFNULL((select id from login_log where ip = ? AND succeeded = 1 ORDER BY id DESC LIMIT 1), 0)',
-  #  $ip, $ip);
-  my $log = $self->redis->get("ip-fail-$ip") // 0;
-  $self->config->{ip_ban_threshold} <= $log;
-};
-
 sub attempt_login {
   my ($self, $login, $password, $ip) = @_;
   my $user = $users_login_table->{ $login };
 
-  if ($self->ip_banned($ip)) {
+  my ($user_fail,$ip_fail) = $self->redis->mget("user-fail-$user->{id}", "ip-fail-$ip");
+  if ($self->config->{ip_ban_threshold} <= ($ip_fail // 0)) {
     $self->login_log(0, $login, $ip, $user ? $user->{id} : undef);
     return undef, 'banned';
   }
 
-  if ($self->user_locked($user)) {
+  if ($self->config->{user_lock_threshold} <= ($user_fail // 0)) {
     $self->login_log(0, $login, $ip, $user->{id});
     return undef, 'locked';
   }
@@ -139,9 +122,6 @@ sub current_user {
 sub last_login {
   my ($self, $user_id) = @_;
 
-  #my $logs = $self->db->select_all(
-  # 'SELECT * FROM login_log WHERE succeeded = 1 AND user_id = ? ORDER BY id DESC LIMIT 2',
-  # $user_id);
   my @logs = $self->redis->lrange("user-log-$user_id",0,1);
   my $log = $logs[-1] // '';
   my @log = split /\|/, $log;
@@ -208,11 +188,7 @@ sub login_log {
     $self->redis->incr("user-fail-$user_id",$cb);
   }
   $self->redis->lpush("login-log", join("\t",$lt,$user_id, $login, $ip, ($succeeded ? 1 : 0)),$cb);
-  $self->redis->wait_all_responses;
-  #$self->db->query(
-  #  'INSERT INTO login_log (`created_at`, `user_id`, `login`, `ip`, `succeeded`) VALUES (NOW(),?,?,?,?)',
-  #  $user_id, $login, $ip, ($succeeded ? 1 : 0)
-  #);
+  $self->redis->wait_one_response;
 };
 
 sub set_flash {
@@ -222,15 +198,15 @@ sub set_flash {
 
 sub pop_flash {
   my ($self, $c, $msg) = @_;
-  delete $c->req->env->{'psgix.session'}->{flash};
+  delete $c->req->env->{'psgix.session'}->{flash}
+    if exists $c->req->env->{'psgix.session'}->{flash};
 };
 
 filter 'session' => sub {
   my ($app) = @_;
   sub {
     my ($self, $c) = @_;
-    my $sid = $c->req->env->{'psgix.session.options'}->{id};
-    $c->stash->{session_id} = $sid;
+    $c->stash->{session_id} = $c->req->env->{'psgix.session.options'}->{id};
     $c->stash->{session}    = $c->req->env->{'psgix.session'};
     $app->($self, $c);
   };
@@ -274,7 +250,6 @@ get '/mypage' => [qw(session)] => sub {
   my ($self, $c) = @_;
   my $user_id = $c->req->env->{'psgix.session'}->{user_id};
   my $user = $self->current_user($user_id);
-  my $msg;
 
   if ($user) {
     $c->render('mypage.tx', { last_login => $self->last_login($user_id) });
