@@ -30,8 +30,8 @@ builder {
             serialize_methods => [ sub { $encoder->encode($_[0])}, 
                                    sub { $decoder->decode($_[0])} ],
         }),
-#      store => $cfm,
-#      serializer => [sub { $encoder->encode($_[0]) }, sub { $decoder->decode($_[0]) }],
+      #store => $cfm,
+      #serializer => [sub { $encoder->encode($_[0]) }, sub { $decoder->decode($_[0]) }],
       httponly => 1,
       cookie_name => "isu4_session",
       keep_empty => 0;

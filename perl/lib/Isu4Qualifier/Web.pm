@@ -7,9 +7,8 @@ use Kossy;
 use DBIx::Sunny;
 use Digest::SHA qw/ sha256_hex /;
 use Data::Dumper;
-use Redis::Fast;
+use Redis::Jet;
 
-my $cb = sub {};
 my $users_login_table = +{};
 my $users_id_table = {};
 {
@@ -32,19 +31,18 @@ my $users_id_table = {};
         $users_login_table->{ $u->{login} } = $u;
         $users_id_table->{ $u->{id} } = $u;
     }
-    my $redis = Redis::Fast->new(server => '127.0.0.1:6379');
-    $redis->flushall;
+    my $redis = Redis::Jet->new(server => '127.0.0.1:6379');
+    $redis->command('flushall');
     my $log = $db->select_all( 'SELECT * FROM login_log ORDER BY id ASC' );
     foreach my $l (@$log) {
       #ip
-      $redis->incr("ip-fail-$l->{ip}",$cb);
-      $redis->del("ip-fail-$l->{ip}",$cb) if $l->{succeeded};
-      #user
-      $redis->incr("user-fail-$l->{user_id}",$cb);
-      $redis->del("user-fail-$l->{user_id}",$cb) if $l->{succeeded};
-      #user-log
-      $redis->lpush("user-log-$l->{user_id}",$l->{created_at}."|".$l->{ip},$cb) if $l->{succeeded};
-      $redis->wait_one_response;
+      my @pipeline;
+      push @pipeline, ['incr',"ip-fail-$l->{ip}"];
+      push @pipeline, ['del',"ip-fail-$l->{ip}"] if $l->{succeeded};
+      push @pipeline, ['incr',"user-fail-$l->{user_id}"];
+      push @pipeline, ['del', "ip-fail-$l->{ip}"] if $l->{succeeded};
+      push @pipeline, ['lpush', "user-log-$l->{user_id}", $l->{created_at}."|".$l->{ip}];
+      $redis->pipeline(@pipeline);
     }
 }
 
@@ -57,7 +55,11 @@ sub config {
 };
 
 sub redis {
-  $_[0]->{redis} ||= Redis::Fast->new(server => '127.0.0.1:6379',encoding => undef);
+  $_[0]->{redis} ||= Redis::Jet->new(server => '127.0.0.1:6379');
+}
+
+sub redis_noreply {
+  $_[0]->{redis_noreply} ||= Redis::Jet->new(server => '127.0.0.1:6379',noreply=>1);
 }
 sub db {
   my ($self) = @_;
@@ -89,7 +91,9 @@ sub attempt_login {
   my ($self, $login, $password, $ip) = @_;
   my $user = $users_login_table->{ $login };
 
-  my ($user_fail,$ip_fail) = $self->redis->mget("user-fail-$user->{id}", "ip-fail-$ip");
+  my $fail = $self->redis->command('mget',"user-fail-$user->{id}", "ip-fail-$ip");
+  my $user_fail = $fail->[0];
+  my $ip_fail = $fail->[1];
   if ($self->config->{ip_ban_threshold} <= ($ip_fail // 0)) {
     $self->login_log(0, $login, $ip, $user ? $user->{id} : undef);
     return undef, 'banned';
@@ -122,8 +126,8 @@ sub current_user {
 sub last_login {
   my ($self, $user_id) = @_;
 
-  my @logs = $self->redis->lrange("user-log-$user_id",0,1);
-  my $log = $logs[-1] // '';
+  my $logs = $self->redis->command('lrange',"user-log-$user_id",0,1);
+  my $log = $logs->[-1] // '';
   my @log = split /\|/, $log;
   { created_at => $log[0], ip => $log[1] };
 };
@@ -178,17 +182,15 @@ sub login_log {
   my ($self, $succeeded, $login, $ip, $user_id) = @_;
   my @lt = localtime;
   my $lt = sprintf('%04d-%02d-%02d %02d:%02d:%02d',$lt[5]+1900,$lt[4]+1,$lt[3],$lt[2],$lt[1],$lt[0]);
+  my @pipeline;
   if ( $succeeded ) {
-    $self->redis->del("ip-fail-$ip",$cb);
-    $self->redis->del("user-fail-$user_id",$cb);
-    $self->redis->lpush("user-log-$user_id","$lt|$ip",$cb);
+    push @pipeline, ['del',"ip-fail-$ip"], ['del',"user-fail-$user_id"], ['lpush',"user-log-$user_id","$lt|$ip"];
   }
   else {
-    $self->redis->incr("ip-fail-$ip",$cb);
-    $self->redis->incr("user-fail-$user_id",$cb);
+    push @pipeline, ['incr',"ip-fail-$ip"],['incr',"user-fail-$user_id"];
   }
-  $self->redis->lpush("login-log", join("\t",$lt,$user_id, $login, $ip, ($succeeded ? 1 : 0)),$cb);
-  $self->redis->wait_one_response;
+   push @pipeline, ['lpush',"login-log", join("\t",$lt,$user_id, $login, $ip, ($succeeded ? 1 : 0))];
+  $self->redis_noreply->pipeline(@pipeline);
 };
 
 sub set_flash {
@@ -262,8 +264,8 @@ get '/mypage' => [qw(session)] => sub {
 
 get '/report' => sub {
   my ($self, $c) = @_;
-  my @logs = $self->redis->lrange("login-log",0,-1);
-  for my $l ( reverse @logs ) {
+  my $logs = $self->redis->command('lrange',"login-log",0,-1);
+  for my $l ( reverse @$logs ) {
     my @l = split /\t/, $l;
     $self->db->query(
       'INSERT INTO login_log (`created_at`, `user_id`, `login`, `ip`, `succeeded`) VALUES (?,?,?,?,?)',
