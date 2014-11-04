@@ -9,6 +9,7 @@ use Digest::SHA qw/ sha256_hex /;
 use Data::Dumper;
 use Redis::Jet;
 use Isu4Qualifier::Template;
+use List::MoreUtils qw/natatime/;
 
 my $users_login_table = +{};
 my $users_id_table = {};
@@ -32,7 +33,7 @@ my $users_id_table = {};
         $users_login_table->{ $u->{login} } = $u;
         $users_id_table->{ $u->{id} } = $u;
     }
-    my $redis = Redis::Jet->new(server => '127.0.0.1:6379');
+    my $redis = Redis::Jet->new(server => '127.0.0.1:6379',noreply=>1);
     $redis->command('flushall');
     my $log = $db->select_all( 'SELECT * FROM login_log ORDER BY id ASC' );
     foreach my $l (@$log) {
@@ -285,12 +286,16 @@ get '/mypage' => [qw(session)] => sub {
 get '/report' => sub {
   my ($self, $c) = @_;
   my $logs = $self->redis->command('lrange',"login-log",0,-1);
-  for my $l ( reverse @$logs ) {
-    my @l = split /\t/, $l;
-    $self->db->query(
-      'INSERT INTO login_log (`created_at`, `user_id`, `login`, `ip`, `succeeded`) VALUES (?,?,?,?,?)',
-      @l
-    );
+  my $it = natatime 600, reverse @$logs;
+  while (my @logs = $it->()) {
+      my $values = '(?,?,?,?,?),'x(scalar @logs);
+      chop $values;
+      my @bind;
+      push(@bind, split /\t/, $_) for @logs;
+      $self->db->query(
+          'INSERT INTO login_log (`created_at`, `user_id`, `login`, `ip`, `succeeded`) VALUES '.$values,
+          @bind
+      );
   }
 
   $c->render_json({
