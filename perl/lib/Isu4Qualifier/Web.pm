@@ -270,7 +270,7 @@ get '/mypage' => [qw(session)] => sub {
             Isu4Qualifier::Template->get('mypage_2'),
             $last_login->{ip},
             Isu4Qualifier::Template->get('mypage_3'),
-            $last_login->{login},
+            $user->{login},
             Isu4Qualifier::Template->get('mypage_4'),
             Isu4Qualifier::Template->get('base_after')
             ]);
