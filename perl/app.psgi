@@ -1,39 +1,70 @@
+use strict;
+use warnings;
 use FindBin;
 use lib "$FindBin::Bin/extlib/lib/perl5";
 use lib "$FindBin::Bin/lib";
 use File::Basename;
 use Plack::Builder;
 use Isu4Qualifier::Web;
-use Plack::Session::State::Cookie;
-use Plack::Session::Store::File;
-use Cache::Memcached::Fast;
-use Sereal;
 use File::Temp qw/tempdir/;
-use Cache::FastMmap;
+use JSON::XS;
+use Cookie::Baker;
 
 my $root_dir = File::Basename::dirname(__FILE__);
-my $session_dir = "/tmp/isu4_session_plack";
-mkdir $session_dir;
 
-my $decoder = Sereal::Decoder->new();
-my $encoder = Sereal::Encoder->new();
+my $_JSON = JSON::XS->new->utf8->canonical;
+my $cookie_name = 'isu4_session';
+
 local $Kossy::XSLATE_CACHE = 2;
 local $Kossy::XSLATE_CACHE_DIR = tempdir(DIR=>"/dev/shm");
 local $Kossy::SECURITY_HEADER = 0;
-my $cfm = Cache::FastMmap->new(raw_values => 1,share_file=>"/dev/shm/sharefile-$$");
 my $app = Isu4Qualifier::Web->psgi($root_dir);
+
 builder {
-  enable 'ReverseProxy';
-  enable 'Session::Simple',
-        store => Cache::Memcached::Fast->new({
-            servers => [ { address => "localhost:11211",noreply=>0} ],
-            serialize_methods => [ sub { $encoder->encode($_[0])}, 
-                                   sub { $decoder->decode($_[0])} ],
-        }),
-      #store => $cfm,
-      #serializer => [sub { $encoder->encode($_[0]) }, sub { $decoder->decode($_[0]) }],
-      httponly => 1,
-      cookie_name => "isu4_session",
-      keep_empty => 0;
-  $app;
+    enable 'ReverseProxy';
+    enable sub {
+        my $mapp = shift;
+        sub {
+            my $env = shift;
+            my $cookie = crush_cookie($env->{HTTP_COOKIE} || '')->{$cookie_name};
+            if ( $cookie ) {
+               $env->{'psgix.session'} =  $_JSON->decode($cookie);
+               $env->{'psgix.session.options'} = {
+                   id => $cookie
+               };
+            }
+            else {
+                $cookie = '{}';
+                $env->{'psgix.session'} = {};
+                $env->{'psgix.session.options'} = {
+                    id => '{}',
+                    new_session => 1,
+                };
+            }
+
+            my $res = $mapp->($env);
+
+            my $cookie2 = $_JSON->encode($env->{'psgix.session'});
+            my $bake_cookie;
+            if ($env->{'psgix.session.options'}->{expire}) {
+                $bake_cookie = bake_cookie( $cookie_name, {
+                    value => '{}',
+                    path => '/',
+                    expire => 'none',
+                    httponly => 1 
+                });
+            }
+            elsif ( $cookie ne $cookie2 ) {
+                $bake_cookie = bake_cookie( $cookie_name, {
+                    value => $cookie2,
+                    path => '/',
+                    expire => 'none',
+                    httponly => 1 
+                });
+            }
+            Plack::Util::header_push($res->[1], 'Set-Cookie', $bake_cookie) if $bake_cookie;
+            $res;
+        };
+    };
+    $app;
 };
