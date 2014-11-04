@@ -7,6 +7,7 @@ use Data::Section::Simple;
 my $reader = Data::Section::Simple->new(__PACKAGE__)->get_data_section;
 chomp($reader->{$_}) for keys %$reader;
 chomp($reader->{$_}) for keys %$reader;
+$reader->{$_} =~ s/^ +//gms for keys %$reader;
 sub get {
     my $class = shift;
     $reader->{$_[0]};
