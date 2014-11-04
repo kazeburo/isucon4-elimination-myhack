@@ -16,7 +16,7 @@ my $_JSON = JSON::XS->new->utf8->canonical;
 my $cookie_name = 'isu4_session';
 
 local $Kossy::XSLATE_CACHE = 2;
-local $Kossy::XSLATE_CACHE_DIR = tempdir(DIR=>"/dev/shm");
+local $Kossy::XSLATE_CACHE_DIR = tempdir(DIR=>-d "/dev/shm" ? "/dev/shm" : "/tmp");
 local $Kossy::SECURITY_HEADER = 0;
 my $app = Isu4Qualifier::Web->psgi($root_dir);
 

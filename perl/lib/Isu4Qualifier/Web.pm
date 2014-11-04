@@ -8,6 +8,7 @@ use DBIx::Sunny;
 use Digest::SHA qw/ sha256_hex /;
 use Data::Dumper;
 use Redis::Jet;
+use Isu4Qualifier::Template;
 
 my $users_login_table = +{};
 my $users_id_table = {};
@@ -215,9 +216,16 @@ filter 'session' => sub {
 };
 
 get '/' => [qw(session)] => sub {
-  my ($self, $c) = @_;
-
-  $c->render('index.tx', { flash => $self->pop_flash($c) });
+    my ($self, $c) = @_;
+    my $flash = $self->pop_flash($c);
+    $c->res->body([
+        Isu4Qualifier::Template->get('base_before'),
+        Isu4Qualifier::Template->get('index_before'),
+        $flash ? q!<div id="notice-message" class="alert alert-danger" role="alert">!.$flash.q!</div>! : (),
+        Isu4Qualifier::Template->get('index_after'),
+        Isu4Qualifier::Template->get('base_after')
+        ]);
+    $c->res;
 };
 
 post '/login' => sub {
@@ -249,17 +257,29 @@ post '/login' => sub {
 };
 
 get '/mypage' => [qw(session)] => sub {
-  my ($self, $c) = @_;
-  my $user_id = $c->req->env->{'psgix.session'}->{user_id};
-  my $user = $self->current_user($user_id);
-
-  if ($user) {
-    $c->render('mypage.tx', { last_login => $self->last_login($user_id) });
-  }
-  else {
-    $self->set_flash($c, "You must be logged in");
-    $c->redirect('/');
-  }
+    my ($self, $c) = @_;
+    my $user_id = $c->req->env->{'psgix.session'}->{user_id};
+    my $user = $self->current_user($user_id);
+    
+    if ($user) {
+        my $last_login = $self->last_login($user_id);
+        $c->res->body([
+            Isu4Qualifier::Template->get('base_before'),
+            Isu4Qualifier::Template->get('mypage_1'),
+            $last_login->{created_at},
+            Isu4Qualifier::Template->get('mypage_2'),
+            $last_login->{ip},
+            Isu4Qualifier::Template->get('mypage_3'),
+            $last_login->{login},
+            Isu4Qualifier::Template->get('mypage_4'),
+            Isu4Qualifier::Template->get('base_after')
+            ]);
+        $c->res;
+    }
+    else {
+        $self->set_flash($c, "You must be logged in");
+        $c->redirect('/');
+    }
 };
 
 get '/report' => sub {
