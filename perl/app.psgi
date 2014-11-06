@@ -10,6 +10,7 @@ use File::Temp qw/tempdir/;
 use JSON::XS;
 use Cookie::Baker;
 use Isu4Qualifier::Template;
+use Isu4Qualifier::Model;
 
 my $root_dir = File::Basename::dirname(__FILE__);
 
@@ -20,6 +21,7 @@ local $Kossy::XSLATE_CACHE = 2;
 local $Kossy::XSLATE_CACHE_DIR = tempdir(DIR=>-d "/dev/shm" ? "/dev/shm" : "/tmp");
 local $Kossy::SECURITY_HEADER = 0;
 my $app = Isu4Qualifier::Web->psgi($root_dir);
+my $model = Isu4Qualifier::Model->new;
 
 builder {
     enable 'ReverseProxy';
@@ -71,15 +73,37 @@ builder {
         my $mapp = shift;
         sub {
             my $env = shift;
-            return $mapp->($env) if $env->{PATH_INFO} ne '/';
-            my $flash = delete $env->{'psgix.session'}->{flash};
-            [200,['Content-Type'=>'text/htmlcharset=UTF-8'],[
-                Isu4Qualifier::Template->get('base_before'),
-                Isu4Qualifier::Template->get('index_before'),
-                $flash ? q!<div id="notice-message" class="alert alert-danger" role="alert">!.$flash.q!</div>! : (),
-                Isu4Qualifier::Template->get('index_after'),
-                Isu4Qualifier::Template->get('base_after') 
-            ]];
+            if ( $env->{PATH_INFO} eq '/' ) {
+                my $flash = delete $env->{'psgix.session'}->{flash};
+                return [200,['Content-Type'=>'text/htmlcharset=UTF-8'],[
+                    Isu4Qualifier::Template->get('base_before'),
+                    Isu4Qualifier::Template->get('index_before'),
+                    $flash ? q!<div id="notice-message" class="alert alert-danger" role="alert">!.$flash.q!</div>! : (),
+                    Isu4Qualifier::Template->get('index_after'),
+                    Isu4Qualifier::Template->get('base_after') 
+                    ]];
+            }
+            elsif ( $env->{PATH_INFO} eq '/mypage' ) {
+                my $user_id = $env->{'psgix.session'}->{user_id};
+                my $user = $model->user_id($user_id);
+                if ($user) {
+                    my $last_login = $model->last_login($user_id);
+                    return [200,['Content-Type'=>'text/htmlcharset=UTF-8'],[
+                        Isu4Qualifier::Template->get('base_before'),
+                        Isu4Qualifier::Template->get('mypage_1'),
+                        $last_login->{created_at},
+                        Isu4Qualifier::Template->get('mypage_2'),
+                        $last_login->{ip},
+                        Isu4Qualifier::Template->get('mypage_3'),
+                        $user->{login},
+                        Isu4Qualifier::Template->get('mypage_4'),
+                        Isu4Qualifier::Template->get('base_after')
+                        ]];
+                }
+                $env->{'psgix.session'}->{flash} = 'You must be logged in';
+                return [302,[Location=>"/"],[]];
+            }
+            return $mapp->($env)
         }
     };
     $app;

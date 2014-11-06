@@ -9,44 +9,9 @@ use Digest::SHA qw/ sha256_hex /;
 use Data::Dumper;
 use Redis::Jet;
 use Isu4Qualifier::Template;
+use Isu4Qualifier::Model;
 use List::MoreUtils qw/natatime/;
 
-my $users_login_table = +{};
-my $users_id_table = {};
-{
-    my $host = $ENV{ISU4_DB_HOST} || '127.0.0.1';
-    my $port = $ENV{ISU4_DB_PORT} || 3306;
-    my $username = $ENV{ISU4_DB_USER} || 'root';
-    my $password = $ENV{ISU4_DB_PASSWORD};
-    my $database = $ENV{ISU4_DB_NAME} || 'isu4_qualifier';
-    my $db = DBIx::Sunny->connect(
-        "dbi:mysql:database=$database;host=$host;port=$port", $username, $password, {
-            RaiseError => 1,
-            PrintError => 0,
-            AutoInactiveDestroy => 1,
-            mysql_enable_utf8   => 1,
-            mysql_auto_reconnect => 1,
-        },
-      );
-    my $users = $db->select_all( 'SELECT * FROM users' );
-    foreach my $u (@$users) {
-        $users_login_table->{ $u->{login} } = $u;
-        $users_id_table->{ $u->{id} } = $u;
-    }
-    my $redis = Redis::Jet->new(server => '127.0.0.1:6379',noreply=>1);
-    $redis->command('flushall');
-    my $log = $db->select_all( 'SELECT * FROM login_log ORDER BY id ASC' );
-    foreach my $l (@$log) {
-      #ip
-      my @pipeline;
-      push @pipeline, ['incr',"ip-fail-$l->{ip}"];
-      push @pipeline, ['del',"ip-fail-$l->{ip}"] if $l->{succeeded};
-      push @pipeline, ['incr',"user-fail-$l->{user_id}"];
-      push @pipeline, ['del', "ip-fail-$l->{ip}"] if $l->{succeeded};
-      push @pipeline, ['lpush', "user-log-$l->{user_id}", $l->{created_at}."|".$l->{ip}];
-      $redis->pipeline(@pipeline);
-    }
-}
 
 sub config {
   my ($self) = @_;
@@ -57,12 +22,17 @@ sub config {
 };
 
 sub redis {
-  $_[0]->{redis} ||= Redis::Jet->new(server => '127.0.0.1:6379');
+    $_[0]->model->redis
 }
 
 sub redis_noreply {
-  $_[0]->{redis_noreply} ||= Redis::Jet->new(server => '127.0.0.1:6379',noreply=>1);
+    $_[0]->model->redis_noreply
 }
+
+sub model {
+    $_[0]->{mode} ||= Isu4Qualifier::Model->new();
+}
+
 sub db {
   my ($self) = @_;
   my $host = $ENV{ISU4_DB_HOST} || '127.0.0.1';
@@ -91,7 +61,7 @@ sub calculate_password_hash {
 
 sub attempt_login {
   my ($self, $login, $password, $ip) = @_;
-  my $user = $users_login_table->{ $login };
+  my $user = $self->model->user_login($login);
 
   my $fail = $self->redis->command('mget',"user-fail-$user->{id}", "ip-fail-$ip");
   my $user_fail = $fail->[0];
@@ -120,19 +90,6 @@ sub attempt_login {
   }
 };
 
-sub current_user {
-  my ($self, $user_id) = @_;
-  $users_id_table->{ $user_id };
-};
-
-sub last_login {
-  my ($self, $user_id) = @_;
-
-  my $logs = $self->redis->command('lrange',"user-log-$user_id",0,1);
-  my $log = $logs->[-1] // '';
-  my @log = split /\|/, $log;
-  { created_at => $log[0], ip => $log[1] };
-};
 
 sub banned_ips {
   my ($self) = @_;
@@ -260,10 +217,10 @@ post '/login' => sub {
 get '/mypage' => [qw(session)] => sub {
     my ($self, $c) = @_;
     my $user_id = $c->req->env->{'psgix.session'}->{user_id};
-    my $user = $self->current_user($user_id);
+    my $user = $self->model->user_id($user_id);
     
     if ($user) {
-        my $last_login = $self->last_login($user_id);
+        my $last_login = $self->model->last_login($user_id);
         $c->res->body([
             Isu4Qualifier::Template->get('base_before'),
             Isu4Qualifier::Template->get('mypage_1'),
