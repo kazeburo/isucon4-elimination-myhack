@@ -80,7 +80,7 @@ sub calculate_password_hash {
 
 sub attempt_login {
   my ($self, $login, $password, $ip) = @_;
-  my $user = $self->model->user_login($login);
+  my $user = $self->user_login($login);
 
   my $fail = $self->redis->command('mget',"user-fail-$user->{id}", "ip-fail-$ip");
   my $user_fail = $fail->[0];
