@@ -11,6 +11,7 @@ use JSON::XS;
 use Cookie::Baker;
 use Isu4Qualifier::Template;
 use Isu4Qualifier::Model;
+use WWW::Form::UrlEncoded::XS qw/parse_urlencoded build_urlencoded/;
 
 my $root_dir = File::Basename::dirname(__FILE__);
 
@@ -31,7 +32,7 @@ builder {
             my $env = shift;
             my $cookie = crush_cookie($env->{HTTP_COOKIE} || '')->{$cookie_name};
             if ( $cookie ) {
-               $env->{'psgix.session'} =  $_JSON->decode($cookie);
+               $env->{'psgix.session'} = +{parse_urlencoded($cookie)};
                $env->{'psgix.session.options'} = {
                    id => $cookie
                };
@@ -47,7 +48,7 @@ builder {
 
             my $res = $mapp->($env);
 
-            my $cookie2 = $_JSON->encode($env->{'psgix.session'});
+            my $cookie2 = build_urlencoded(%{$env->{'psgix.session'}});
             my $bake_cookie;
             if ($env->{'psgix.session.options'}->{expire}) {
                 $bake_cookie = bake_cookie( $cookie_name, {
