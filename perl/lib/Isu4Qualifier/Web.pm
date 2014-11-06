@@ -12,13 +12,8 @@ use Isu4Qualifier::Template;
 use Isu4Qualifier::Model;
 use List::MoreUtils qw/natatime/;
 
-
 sub config {
-  my ($self) = @_;
-  $self->{_config} ||= {
-    user_lock_threshold => $ENV{'ISU4_USER_LOCK_THRESHOLD'} || 3,
-    ip_ban_threshold => $ENV{'ISU4_IP_BAN_THRESHOLD'} || 10
-  };
+    $_[0]->model->config
 };
 
 sub redis {

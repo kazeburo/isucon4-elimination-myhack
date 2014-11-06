@@ -47,6 +47,13 @@ my $users_id_table = {};
     }
 }
 
+sub config {
+  my ($self) = @_;
+  $self->{_config} ||= {
+    user_lock_threshold => $ENV{'ISU4_USER_LOCK_THRESHOLD'} || 3,
+    ip_ban_threshold => $ENV{'ISU4_IP_BAN_THRESHOLD'} || 10
+  };
+};
 
 sub user_login {
     $users_login_table->{$_[1]};
