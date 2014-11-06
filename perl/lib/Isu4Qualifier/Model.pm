@@ -5,6 +5,7 @@ use warnings;
 use utf8;
 use DBIx::Sunny;
 use Redis::Jet;
+use Digest::SHA qw/ sha256_hex /;
 
 sub new {
     bless {}, $_[0];

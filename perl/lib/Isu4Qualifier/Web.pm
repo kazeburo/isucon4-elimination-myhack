@@ -5,8 +5,6 @@ use warnings;
 use utf8;
 use Kossy;
 use DBIx::Sunny;
-use Digest::SHA qw/ sha256_hex /;
-use Data::Dumper;
 use Redis::Jet;
 use Isu4Qualifier::Template;
 use Isu4Qualifier::Model;
