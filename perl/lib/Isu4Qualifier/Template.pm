@@ -8,6 +8,8 @@ my $reader = Data::Section::Simple->new(__PACKAGE__)->get_data_section;
 chomp($reader->{$_}) for keys %$reader;
 chomp($reader->{$_}) for keys %$reader;
 $reader->{$_} =~ s/^ +//gms for keys %$reader;
+$reader->{$_} =~ s/\n//gms for keys %$reader;
+$reader->{$_} =~ s/="([a-zA-Z0-9-_]+)"/=$1/gms for keys %$reader;
 sub get {
     my $class = shift;
     $reader->{$_[0]};

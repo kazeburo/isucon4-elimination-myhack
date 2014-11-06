@@ -9,6 +9,7 @@ use Isu4Qualifier::Web;
 use File::Temp qw/tempdir/;
 use JSON::XS;
 use Cookie::Baker;
+use Isu4Qualifier::Template;
 
 my $root_dir = File::Basename::dirname(__FILE__);
 
@@ -65,6 +66,21 @@ builder {
             Plack::Util::header_push($res->[1], 'Set-Cookie', $bake_cookie) if $bake_cookie;
             $res;
         };
+    };
+    enable sub {
+        my $mapp = shift;
+        sub {
+            my $env = shift;
+            return $mapp->($env) if $env->{PATH_INFO} ne '/';
+            my $flash = delete $env->{'psgix.session'}->{flash};
+            [200,['Content-Type'=>'text/htmlcharset=UTF-8'],[
+                Isu4Qualifier::Template->get('base_before'),
+                Isu4Qualifier::Template->get('index_before'),
+                $flash ? q!<div id="notice-message" class="alert alert-danger" role="alert">!.$flash.q!</div>! : (),
+                Isu4Qualifier::Template->get('index_after'),
+                Isu4Qualifier::Template->get('base_after') 
+            ]];
+        }
     };
     $app;
 };
