@@ -54,41 +54,6 @@ sub db {
   };
 }
 
-sub calculate_password_hash {
-  my ($password, $salt) = @_;
-  sha256_hex($password . ':' . $salt);
-};
-
-sub attempt_login {
-  my ($self, $login, $password, $ip) = @_;
-  my $user = $self->model->user_login($login);
-
-  my $fail = $self->redis->command('mget',"user-fail-$user->{id}", "ip-fail-$ip");
-  my $user_fail = $fail->[0];
-  my $ip_fail = $fail->[1];
-  if ($self->config->{ip_ban_threshold} <= ($ip_fail // 0)) {
-    $self->login_log(0, $login, $ip, $user ? $user->{id} : undef);
-    return undef, 'banned';
-  }
-
-  if ($self->config->{user_lock_threshold} <= ($user_fail // 0)) {
-    $self->login_log(0, $login, $ip, $user->{id});
-    return undef, 'locked';
-  }
-
-  if ($user && calculate_password_hash($password, $user->{salt}) eq $user->{password_hash}) {
-    $self->login_log(1, $login, $ip, $user->{id});
-    return $user, undef;
-  }
-  elsif ($user) {
-    $self->login_log(0, $login, $ip, $user->{id});
-    return undef, 'wrong_password';
-  }
-  else {
-    $self->login_log(0, $login, $ip);
-    return undef, 'wrong_login';
-  }
-};
 
 
 sub banned_ips {
@@ -137,20 +102,6 @@ sub locked_users {
   \@user_ids;
 };
 
-sub login_log {
-  my ($self, $succeeded, $login, $ip, $user_id) = @_;
-  my @lt = localtime;
-  my $lt = sprintf('%04d-%02d-%02d %02d:%02d:%02d',$lt[5]+1900,$lt[4]+1,$lt[3],$lt[2],$lt[1],$lt[0]);
-  my @pipeline;
-  if ( $succeeded ) {
-    push @pipeline, ['del',"ip-fail-$ip"], ['del',"user-fail-$user_id"], ['lpush',"user-log-$user_id","$lt|$ip"];
-  }
-  else {
-    push @pipeline, ['incr',"ip-fail-$ip"],['incr',"user-fail-$user_id"];
-  }
-   push @pipeline, ['lpush',"login-log", join("\t",$lt,$user_id, $login, $ip, ($succeeded ? 1 : 0))];
-  $self->redis_noreply->pipeline(@pipeline);
-};
 
 sub set_flash {
   my ($self, $c, $msg) = @_;
@@ -190,9 +141,9 @@ post '/login' => sub {
   my ($self, $c) = @_;
   my $msg;
 
-  my ($user, $err) = $self->attempt_login(
-    $c->req->param('login'),
-    $c->req->param('password'),
+  my ($user, $err) = $self->model->attempt_login(
+    $c->req->body_parameters_raw->{login},
+    $c->req->body_parameters_raw->{password},
     $c->req->address || '127.0.0.1'
   );
 
