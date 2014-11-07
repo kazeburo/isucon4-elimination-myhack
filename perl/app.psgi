@@ -25,11 +25,15 @@ my $app = Isu4Qualifier::Web->psgi($root_dir);
 my $model = Isu4Qualifier::Model->new;
 
 builder {
-    enable 'ReverseProxy';
+    #enable 'ReverseProxy';
     enable sub {
         my $mapp = shift;
         sub {
             my $env = shift;
+
+            my ( $ip, ) = $env->{HTTP_X_FORWARDED_FOR} =~ /([^,\s]+)$/;
+            $env->{REMOTE_ADDR} = $ip;
+
             my $cookie = crush_cookie($env->{HTTP_COOKIE} || '')->{$cookie_name};
             if ( $cookie ) {
                $env->{'psgix.session'} = +{parse_urlencoded($cookie)};
@@ -82,6 +86,9 @@ builder {
                 Isu4Qualifier::Template->get('base_after') 
                 ]];
         }
+        elsif ( $env->{PATH_INFO} eq '/hello' ) {
+            return [200,['Content-Type'=>'text/htmlcharset=UTF-8'],["HelloWorld\n"]];
+        }
         elsif ( $env->{PATH_INFO} eq '/mypage' ) {
             my $user_id = $env->{'psgix.session'}->{user_id};
             my $user = $model->user_id($user_id);
@@ -103,11 +110,14 @@ builder {
             return [302,[Location=>"/"],[]];
         }
         elsif ( $env->{PATH_INFO} eq '/login' ) {
-            my $req = Kossy::Request->new($env);
+            my $input = $env->{'psgi.input'};
+            $input->seek(0, 0);
+            $input->read(my $chunk, 8192);
+            my $params = +{parse_urlencoded($chunk)};
             my ($user, $err) = $model->attempt_login(
-                $req->body_parameters_raw->{login},
-                $req->body_parameters_raw->{password},
-                $req->address || '127.0.0.1'
+                $params->{login},
+                $params->{password},
+                $env->{REMOTE_ADDR} || '127.0.0.1'
             );
             if ($user && $user->{id}) {
                 $env->{'psgix.session'}->{user_id} = $user->{id};
